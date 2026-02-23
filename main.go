@@ -359,6 +359,70 @@ func (a *App) openEditor() {
 	cmd.Run()
 }
 
+func (a *App) rescan() {
+	// Remember current position
+	var curFile string
+	var curLine int
+	if len(a.filtered) > 0 && a.cursor < len(a.filtered) {
+		curFile = a.filtered[a.cursor].FilePath
+		curLine = a.filtered[a.cursor].LineNumber
+	}
+
+	oldCount := len(a.all)
+	a.all = scanDirectory(a.root)
+	newCount := len(a.all)
+
+	// Rebuild filtered list preserving current filter
+	if a.filterTag == "" {
+		a.filtered = append([]Annotation{}, a.all...)
+	} else {
+		a.filtered = nil
+		for _, ann := range a.all {
+			if ann.Tag == a.filterTag {
+				a.filtered = append(a.filtered, ann)
+			}
+		}
+	}
+	a.sortFiltered()
+
+	// Restore cursor position
+	a.cursor = 0
+	if curFile != "" {
+		bestIdx := -1
+		bestDist := -1
+		for i, ann := range a.filtered {
+			if ann.FilePath == curFile {
+				if ann.LineNumber == curLine {
+					bestIdx = i
+					break
+				}
+				dist := ann.LineNumber - curLine
+				if dist < 0 {
+					dist = -dist
+				}
+				if bestDist < 0 || dist < bestDist {
+					bestDist = dist
+					bestIdx = i
+				}
+			}
+		}
+		if bestIdx >= 0 {
+			a.cursor = bestIdx
+		}
+	}
+	a.scroll = 0
+
+	// Status message
+	diff := newCount - oldCount
+	if diff > 0 {
+		a.message = fmt.Sprintf("Rescanned: %d annotations (+%d)", newCount, diff)
+	} else if diff < 0 {
+		a.message = fmt.Sprintf("Rescanned: %d annotations (%d)", newCount, diff)
+	} else {
+		a.message = fmt.Sprintf("Rescanned: %d annotations (no change)", newCount)
+	}
+}
+
 func (a *App) render() {
 	w, h := getTermSize()
 	listHeight := h - 4 // header(2) + footer(2)
@@ -584,6 +648,7 @@ func (a *App) run() {
 			state.restore()
 			fmt.Print(showCur + clearScr + moveTo(1, 1))
 			a.openEditor()
+			a.rescan()
 			state2, err := enableRawMode()
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Failed to re-enable raw mode: %v\n", err)
